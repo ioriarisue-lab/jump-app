@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16242C">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="重心計測">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>着地時の重心計測（矢状面）</title>
+<style>
+:root{
+  --bg:#E7EDEF;--panel:#FFFFFF;--ink:#16242C;--sub:#5A6A73;--line:#C6D1D6;
+  --com:#E0115F;--fwd:#2F6FD6;--hip:#D97706;--knee:#7C3AED;--bone:#35D0B8;--btn:#16242C;--btnInk:#FFFFFF;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root{--bg:#0F171B;--panel:#172329;--ink:#E4ECEF;--sub:#91A2AA;--line:#2B3B43;--btn:#E4ECEF;--btnInk:#0F171B}}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif;font-size:15px;line-height:1.6}
+header{padding:12px 16px 8px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline}
+h1{font-size:18px;margin:0}
+#status{color:var(--sub);font-size:13px;margin:0;flex-basis:100%}
+#who{font-size:13px}
+#who button{margin-left:6px;padding:2px 8px;font-size:12px}
+main{display:grid;gap:12px;padding:0 12px 16px;grid-template-columns:minmax(0,1fr)}
+@media(min-width:960px){main{grid-template-columns:minmax(0,3fr) minmax(320px,2fr)}}
+.stage{background:#000;border-radius:6px;overflow:hidden;min-height:160px}
+.stage canvas{display:block;width:100%;height:auto}
+video{display:none}
+.side{display:grid;gap:12px;align-content:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.row:last-child{margin-bottom:0}
+label{font-size:13px;color:var(--sub)}
+select,input[type=number],input[type=text]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 6px}
+input[type=number]{width:6em}
+button{font:inherit;font-weight:600;border:1px solid var(--btn);background:var(--btn);color:var(--btnInk);border-radius:4px;padding:6px 12px;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink)}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--fwd);outline-offset:2px}
+#recBtn.on{background:var(--com);border-color:var(--com);color:#fff}
+.read{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.read div{border-left:4px solid var(--line);padding-left:8px}
+.read .v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.read .k{font-size:12px;color:var(--sub)}
+.read .vert{border-color:var(--com)}
+.read .fwd{border-color:var(--fwd)}
+.read .hip{border-color:var(--hip)}
+.read .knee{border-color:var(--knee)}
+#chart,#chart2{width:100%;height:180px;display:block}
+#recTxt{color:var(--com);font-weight:600}
+.legend{font-size:12px;color:var(--sub);display:flex;flex-wrap:wrap;gap:4px 14px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:4px}
+#summary{font-size:13px;white-space:pre-line;font-variant-numeric:tabular-nums}
+.hint{font-size:12px;color:var(--sub);margin:0}
+#fileRow{display:none}
+/* 初期入力 */
+#setup{max-width:420px;margin:8px auto 24px;padding:0 12px}
+#setup .panel{padding:18px}
+#setup h2{font-size:16px;margin:0 0 12px}
+.field{display:grid;grid-template-columns:7em 1fr;gap:8px;align-items:center;margin-bottom:12px}
+.field label{font-size:14px;color:var(--ink)}
+.field input,.field select{width:100%}
+#setupErr{color:var(--com);font-size:13px;min-height:1.4em;margin:0 0 8px}
+#startBtn{width:100%;padding:10px}
+.hidden{display:none!important}
+[hidden]{display:none!important}
+#diag summary{cursor:pointer;font-size:14px;color:var(--sub)}
+#diagList{list-style:none;margin:8px 0 0;padding:0;font-size:13px}
+#diagList li{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--line)}
+#diagList li.g b{color:#1A8F4E}
+#diagList li.b b{color:var(--com)}
+#installBox button{margin-top:6px}
+/* スマホ向け */
+@media (max-width:700px){
+  header{padding:10px 12px 6px}
+  h1{font-size:16px}
+  main{padding:0 8px 16px;gap:8px}
+  .stage canvas{max-height:62vh;object-fit:contain;background:#000}
+  button,select,input{min-height:44px}
+  .row{gap:10px}
+  .read .v{font-size:24px}
+  #setup{padding:0 8px}
+  #actionBar{position:fixed;left:0;right:0;bottom:0;z-index:10;margin:0!important;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));background:var(--panel);border-top:1px solid var(--line);box-shadow:0 -4px 12px rgba(0,0,0,.08)}
+  #actionBar button{flex:1;min-height:52px;font-size:17px}
+  body{padding-bottom:84px}
+}
+/* オフライン準備 */
+.off{margin:0 12px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.offHead{display:flex;align-items:center;gap:8px;font-size:14px}
+.dot{width:10px;height:10px;border-radius:50%;background:#C98A00;flex:none}
+.off.ok .dot{background:#1A8F4E}
+.off.ng .dot{background:var(--com)}
+.bar{height:6px;background:var(--line);border-radius:3px;margin:8px 0 6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:#C98A00;transition:width .3s}
+.off.ok .bar i{background:#1A8F4E}
+.off p{margin:0 0 4px}
+.off.ok.compact .bar,.off.ok.compact p{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>着地時の重心計測（矢状面）</h1>
+  <span id="who" class="hidden"></span>
+  <p id="status">準備中…</p>
+</header>
+
+<section id="offlineBox" class="off">
+  <div class="offHead"><span id="offDot" class="dot"></span><strong id="offTitle">オフライン準備を確認中…</strong></div>
+  <div class="bar"><i id="offBar"></i></div>
+  <p id="offMsg" class="hint"></p>
+  <button class="ghost" id="recacheBtn" hidden>もう一度ダウンロード</button>
+</section>
+
+<section id="installBox" class="off" hidden>
+  <div class="offHead"><strong>アプリとして使う</strong></div>
+  <p class="hint" id="iosHelp" hidden>Safariの共有ボタン（□↑）→「ホーム画面に追加」で、ホーム画面から起動できます。追加したアイコンから開き直し、上の表示が緑になるまで待ってください。</p>
+  <button id="installBtn" hidden>アプリとしてインストール</button>
+</section>
+
+<section id="setup">
+  <div class="panel">
+    <h2>対象者の情報</h2>
+    <div class="field"><label for="pid">ID（任意）</label><input type="text" id="pid" autocomplete="off"></div>
+    <div class="field"><label for="age">年齢</label><input type="number" id="age" min="1" max="120" inputmode="numeric"></div>
+    <div class="field"><label for="sex">性別</label><select id="sex"><option value="">選択</option><option value="male">男性</option><option value="female">女性</option></select></div>
+    <div class="field"><label for="leg">下肢長（cm）</label><input type="number" id="leg" min="30" max="130" step="0.1" inputmode="decimal"></div>
+    <p class="hint" style="margin:-4px 0 12px">股関節から足関節までの距離。この値で画面上の長さをcmに換算します。</p>
+    <p id="setupErr"></p>
+    <button id="startBtn" disabled>計測を始める</button>
+  </div>
+</section>
+
+<main id="app" class="hidden">
+  <div class="stage"><canvas id="view" width="1280" height="720"></canvas></div>
+  <div class="side">
+    <div class="panel">
+      <div class="row">
+        <label>入力 <select id="mode"><option value="cam">カメラ（リアルタイム）</option><option value="file">動画ファイル</option></select></label>
+      </div>
+      <div class="row" id="camRow">
+        <button id="camBtn">カメラ開始</button>
+        <select id="facing"><option value="environment">背面カメラ</option><option value="user">前面カメラ</option></select>
+      </div>
+      <div class="row" id="camPick" hidden>
+        <select id="camSel" aria-label="使用するカメラ"></select>
+        <button class="ghost" id="camNext">次のカメラ</button>
+      </div>
+      <div class="row" id="vidRow">
+        <label>動画の保存 <select id="vidMode"><option value="raw">元の映像</option><option value="overlay">骨格つき</option><option value="off">保存しない</option></select></label>
+      </div>
+      <div class="row" id="fileRow">
+        <input type="file" id="fileIn" accept="video/*">
+        <label>fps <input type="number" id="fps" value="60" min="10" max="480"></label>
+        <button id="anaBtn" disabled>解析開始</button>
+      </div>
+      <div class="row">
+        <label>計測側 <select id="sideSel"><option value="auto">自動</option><option value="L">左</option><option value="R">右</option></select></label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="read">
+        <div class="vert"><div class="v" id="vY">–</div><div class="k">上下変位 cm（上が＋）</div></div>
+        <div class="fwd"><div class="v" id="vX">–</div><div class="k">前後変位 cm（前が＋）</div></div>
+      </div>
+      <canvas id="chart"></canvas>
+      <div class="legend"><span><i style="background:var(--com)"></i>上下</span><span><i style="background:var(--fwd)"></i>前後</span><span id="scaleTxt"></span><span id="fpsTxt"></span></div>
+      <div class="read" style="margin-top:12px">
+        <div class="hip"><div class="v" id="vHip">–</div><div class="k">股関節屈曲 °</div></div>
+        <div class="knee"><div class="v" id="vKnee">–</div><div class="k">膝関節屈曲 °</div></div>
+      </div>
+      <canvas id="chart2"></canvas>
+      <div class="legend"><span><i style="background:var(--hip)"></i>股関節屈曲</span><span><i style="background:var(--knee)"></i>膝関節屈曲</span><span id="recTxt"></span></div>
+      <div class="row" id="actionBar" style="margin-top:8px">
+        <button id="recBtn" disabled>記録開始</button>
+        <button class="ghost" id="csvBtn" disabled>CSV・動画を保存</button>
+      </div>
+      <p class="hint">最初の約0.5秒の静止立位で下肢長からスケールを決め、その位置を基準（0）にします。静止してから跳んでください。</p>
+    </div>
+
+    <div class="panel"><div id="summary">記録後に結果が出ます。</div></div>
+    <details class="panel" id="diag"><summary>診断情報（うまく動かないとき）</summary><ul id="diagList"></ul></details>
+  </div>
+</main>
+<video id="video" playsinline muted></video>
+
+
+<script>
+var FILE_MSG='ファイルを直接開くと動きません。公開したURL（https://〜）から開いてください。';
+window.addEventListener('error',function(e){var s=document.getElementById('status');if(s&&!window.__appReady)s.textContent=location.protocol==='file:'?FILE_MSG:'読み込みエラー：'+(e.message||(e.target&&e.target.src)||'不明');},true);
+if(location.protocol==='file:'){document.getElementById('status').textContent=FILE_MSG;}
+</script>
+<script src="precache.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
