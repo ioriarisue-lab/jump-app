@@ -49,10 +49,12 @@ function offShow(state,title,msg,pct){
   if(pct!=null) $('offBar').style.width=pct+'%';
 }
 async function cacheCount(){
-  let n=0; for(const f of PC.FILES){ if(await caches.match(new URL(f,location.href).href,{ignoreSearch:true})) n++; }
+  // 自分のキャッシュだけを数える（同じサイトの別アプリが保存したファイルは数えない）
+  const c=await caches.open(PC.VERSION);
+  let n=0; for(const f of PC.FILES){ if(await c.match(new URL(f,location.href).href,{ignoreSearch:true})) n++; }
   return n;
 }
-let offTimer=null;
+let offTimer=null, offStart=Date.now(), autoRecached=false;
 async function checkCache(){
   const n=await cacheCount(), N=PC.FILES.length, pct=Math.round(n/N*100);
   if(n===N){
@@ -62,6 +64,11 @@ async function checkCache(){
   }else{
     offShow('',`オフライン準備中… ${n}/${N} ファイル（${pct}%）`,
       `初回だけ通信が必要です（約${PC.TOTAL_MB}MB）。完了するまでこの画面を開いたまま、ネットにつないだ状態で待ってください。完了後は通信不要です。`,pct);
+    // 一度保存したキャッシュが消えていた場合など、10秒たっても進まなければ自動で保存し直す
+    if(navigator.onLine && !autoRecached && Date.now()-offStart>10000){
+      autoRecached=true;
+      navigator.serviceWorker.ready.then(r=>r.active&&r.active.postMessage('recache')).catch(()=>{});
+    }
     if(!navigator.onLine){ offShow('ng',`オフライン準備が未完了です（${n}/${N}）`,'ネットにつないでから、もう一度このアプリを開いてください。',pct); $('recacheBtn').hidden=false; }
   }
   return n===N;

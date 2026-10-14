@@ -18,9 +18,10 @@ self.addEventListener('install',e=>{
 });
 self.addEventListener('activate',e=>{
   e.waitUntil(caches.keys()
-    .then(ks=>Promise.all(ks.filter(k=>k!==VERSION).map(k=>caches.delete(k))))
+    .then(ks=>Promise.all(ks.filter(k=>k.startsWith('jump-')&&k!==VERSION).map(k=>caches.delete(k))))
     .then(()=>self.clients.claim()));
 });
+// 同じgithub.ioの他のアプリ（CS-30など）のキャッシュは消さない（jump- で始まるものだけ整理）
 // 端末内に保存したものを優先して使う。無いものだけ通信し、エンジン・モデルは保存しておく
 self.addEventListener('fetch',e=>{
   const req=e.request;
@@ -29,7 +30,7 @@ self.addEventListener('fetch',e=>{
   const remote=REMOTE_HOSTS.includes(url.host);
   if(url.origin!==location.origin && !remote) return;
   e.respondWith((async()=>{
-    const hit=await caches.match(req.url,{ignoreSearch:!remote});
+    const hit=await (await caches.open(VERSION)).match(req.url,{ignoreSearch:!remote});
     if(hit) return hit;
     try{
       const res=await fetch(req);
