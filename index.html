@@ -57,7 +57,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 .legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:4px}
 #summary{font-size:13px;white-space:pre-line;font-variant-numeric:tabular-nums}
 .hint{font-size:12px;color:var(--sub);margin:0}
-#fileRow{display:none}
+
 /* 初期入力 */
 #setup{max-width:420px;margin:8px auto 24px;padding:0 12px}
 #setup .panel{padding:18px}
@@ -150,13 +150,21 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
         <select id="camSel" aria-label="使用するカメラ"></select>
         <button class="ghost" id="camNext">次のカメラ</button>
       </div>
-      <div class="row" id="vidRow">
-        <label>動画の保存 <select id="vidMode"><option value="raw">元の映像</option><option value="overlay">骨格つき</option><option value="off">保存しない</option></select></label>
+      <div class="row" id="rtRow">
+        <label>リアルタイム解析 <select id="rtMode"><option value="on">する（骨格・数値を表示）</option><option value="off">しない（撮影だけ・コマ数優先）</option></select></label>
       </div>
-      <div class="row" id="fileRow">
-        <input type="file" id="fileIn" accept="video/*">
-        <label>fps <input type="number" id="fps" value="60" min="10" max="480"></label>
-        <button id="anaBtn" disabled>解析開始</button>
+      <p class="hint" id="rtHint" hidden>撮影中はAIの解析をしないので、カメラのコマ数（30〜60 fps）のまま動画を保存できます。記録停止後に「この動画を解析」を押すと、全コマを解析します。</p>
+      <div class="row" id="vidRow">
+        <label>動画の保存 <select id="vidMode"><option value="both">両方（元の映像＋骨格つき）</option><option value="raw">元の映像だけ</option><option value="overlay">骨格つきだけ</option><option value="off">保存しない</option></select></label>
+      </div>
+      <div id="fileBox" style="display:none">
+        <div class="row"><input type="file" id="fileIn" accept="video/*"></div>
+        <div class="row">
+          <label>動画のfps <input type="number" id="fps" value="30" min="10" max="480" step="any" style="width:5em"></label>
+          <label>撮影時のfps <input type="number" id="capFps" value="30" min="10" max="960" step="any" style="width:5em"></label>
+          <button id="anaBtn" disabled>解析開始</button>
+        </div>
+        <p class="hint" id="fpsHint">動画のfpsは読み込み時に自動で入ります。スロー撮影で動画のfpsが30などになっている場合は、撮影時のfps（120や240）を入れてください。全コマを解析します。</p>
       </div>
       <div class="row">
         <label>計測側 <select id="sideSel"><option value="auto">自動</option><option value="L">左</option><option value="R">右</option></select></label>
@@ -179,6 +187,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
       <div class="row" id="actionBar" style="margin-top:8px">
         <button id="recBtn" disabled>記録開始</button>
         <button class="ghost" id="csvBtn" disabled>CSV・動画を保存</button>
+        <button class="ghost" id="anaNowBtn" hidden>この動画を解析</button>
       </div>
       <p class="hint">最初の約0.5秒の静止立位で下肢長からスケールを決め、その位置を基準（0）にします。静止してから跳んでください。</p>
     </div>
