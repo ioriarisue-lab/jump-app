@@ -101,14 +101,44 @@ $('startBtn').onclick=()=>{
   $('who').innerHTML='';
   $('who').append(`${subj.id?subj.id+'　':''}${age}歳　${sex==='male'?'男性':'女性'}　下肢長 ${leg} cm`);
   const b=document.createElement('button'); b.className='ghost'; b.textContent='変更'; b.onclick=backToSetup; $('who').append(b);
-  $('setup').classList.add('hidden'); $('app').classList.remove('hidden'); $('who').classList.remove('hidden');
-  status('カメラを被験者の真横、腰の高さに置いてください。');
+  $('who').classList.remove('hidden'); $('tabMeas').disabled=false; showTab('meas');
 };
-function backToSetup(){
-  if(recording) return;
-  if(stream) toggleCam();
-  $('app').classList.add('hidden'); $('who').classList.add('hidden'); $('setup').classList.remove('hidden');
+function backToSetup(){ showTab('info'); }
+// ---------- タブ ----------
+function busy(){ return recording||analyzing; }
+function showTab(which){
+  if(which==='info'&&busy()){ status('記録中・解析中はタブを切り替えられません。'); return; }
+  const info=which==='info';
+  if(info&&stream) toggleCam();
+  $('setup').classList.toggle('hidden',!info); $('app').classList.toggle('hidden',info);
+  $('tabInfo').setAttribute('aria-selected',info); $('tabMeas').setAttribute('aria-selected',!info);
+  if(!info) setMode(curMode,true);
 }
+$('tabInfo').onclick=()=>showTab('info');
+$('tabMeas').onclick=()=>{ if(subj) showTab('meas'); else $('startBtn').click(); };
+// ---------- 計測モード（リアルタイム計測／撮影のみ／動画を解析） ----------
+const MODE_HINT={
+  rt:'カメラ映像をその場でAIが解析し、骨格・重心・関節角度を表示しながら記録します。カメラは被験者の真横、腰の高さに置いてください。',
+  cap:'撮影中はAIの解析をせず、カメラのコマ数（30〜60 fps）のまま元の映像を保存します。記録停止後に「この動画を解析」で全コマを解析できます。',
+  file:'保存してある動画（スロー撮影も可）を読み込み、全コマを解析します。'
+};
+let curMode='rt';
+try{ const m=localStorage.getItem('com_mode'); if(m&&MODE_HINT[m]) curMode=m; }catch(e){}
+function setMode(m,force){
+  if(!force&&busy()){ status('記録中・解析中はモードを切り替えられません。'); return; }
+  const changed=m!==curMode; curMode=m;
+  try{localStorage.setItem('com_mode',m);}catch(e){}
+  [['mRt','rt'],['mCap','cap'],['mFile','file']].forEach(([id,k])=>$(id).setAttribute('aria-pressed',k===m));
+  $('modeHint').textContent=MODE_HINT[m];
+  const wantFile=m==='file';
+  if($('mode').value!==(wantFile?'file':'cam')||force){ $('mode').value=wantFile?'file':'cam'; $('mode').onchange(); }
+  if(!wantFile){
+    const off=m==='cap';
+    if(($('rtMode').value==='off')!==off){ if(off) $('vidMode').dataset.prev=$('vidMode').value; $('rtMode').value=off?'off':'on'; applyRt(); }
+  }
+  if(changed&&!wantFile) status(m==='cap'?'撮影のみモードです。カメラを開始してください。':'リアルタイム計測モードです。カメラを開始してください。');
+}
+$('mRt').onclick=()=>setMode('rt'); $('mCap').onclick=()=>setMode('cap'); $('mFile').onclick=()=>setMode('file');
 
 // ---------- 重心計算 ----------
 function pickSide(lm){
@@ -240,7 +270,6 @@ function pickMime(){
 const rtOff=()=>$('rtMode').value==='off';
 function applyRt(){
   const off=rtOff();
-  $('rtHint').hidden=!off;
   const vm=$('vidMode');
   [...vm.options].forEach(o=>{ o.disabled=off&&(o.value==='both'||o.value==='overlay'||o.value==='off'); });
   if(off) vm.value='raw'; else if(vm.value==='raw'&&vm.dataset.prev) vm.value=vm.dataset.prev;
@@ -479,7 +508,7 @@ async function saveFiles(list){
 $('mode').onchange=()=>{
   const f=$('mode').value==='file';
   $('camRow').style.display=f?'none':'flex'; $('fileBox').style.display=f?'block':'none';
-  $('recBtn').style.display=f?'none':''; $('vidRow').style.display=f?'none':'flex'; $('rtRow').style.display=f?'none':'flex'; $('rtHint').hidden=f||!rtOff(); $('anaNowBtn').hidden=true;
+  $('recBtn').style.display=f?'none':''; $('vidRow').style.display=f?'none':'flex'; $('anaNowBtn').hidden=true;
   if(f){ $('camPick').hidden=true; if(stream) toggleCam(); }
 };
 // 動画を少し再生して、コマの間隔から動画のfpsを推定する
@@ -516,7 +545,7 @@ $('fileIn').onchange=async e=>{ const file=e.target.files[0]; if(file){ recs=[];
 // 撮影だけモードで撮った動画を、そのまま全コマ解析に回す
 $('anaNowBtn').onclick=async()=>{
   const raw=recs.find(r=>r.kind==='raw'&&r.blob&&r.blob.size); if(!raw) return;
-  const keep=recs; $('mode').value='file'; $('mode').onchange(); recs=keep;
+  const keep=recs; setMode('file'); recs=keep;
   await loadVideo(raw.blob,'撮った動画');
   if(landmarker) $('anaBtn').click();
 };
