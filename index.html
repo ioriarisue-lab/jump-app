@@ -181,6 +181,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
           <label>撮影時のfps <input type="number" id="capFps" value="30" min="10" max="960" step="any" style="width:5em"></label>
           <button id="anaBtn" disabled>解析開始</button>
         </div>
+        <div class="row" style="margin-top:8px">
+          <label><input type="checkbox" id="syncOn"> 同期ライトを検出する</label>
+          <button id="roiBtn" disabled>光る範囲を指定</button>
+          <span class="hint" id="roiTxt"></span>
+        </div>
+        <div class="row" id="scrubRow" hidden><label style="flex:1;display:flex;gap:6px;align-items:center">コマ送り <input type="range" id="scrub" min="0" max="0" value="0" step="1" style="flex:1"></label><span class="hint" id="scrubTxt"></span></div>
+        <p class="hint" id="syncHint" hidden>ほかの機器と同期させるためのライト（LEDなど）が映る場所を、映像の上で指やマウスでなぞって四角で囲んでください。ライトの本体が見えるコマで囲むと確実です。解析のとき、その範囲が明るくなった瞬間のコマ番号と時間をCSVに書き出します。</p>
         <p class="hint" id="fpsHint">動画のfpsは読み込み時に自動で入ります。スロー撮影で動画のfpsが30などになっている場合は、撮影時のfps（120や240）を入れてください。全コマを解析します。</p>
       </div>
       <div class="row">

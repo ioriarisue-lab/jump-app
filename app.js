@@ -17,7 +17,7 @@ const VIS=0.5, CAL_N=15;
 let landmarker=null, running=false, recording=false, rows=[], dir=1, lockedSide=null;
 let curSide='L', lastTs=0, recStart=0, trail=[], frames=0, fpsT=performance.now(), stream=null;
 let subj=null, scale=null, calLegs=[], origin=null;
-let recs=[], result=null; // recs: 同時に録る動画（元の映像／骨格つき）
+let recs=[], result=null, curFrame=null, sync=null; // sync: 同期ライトの検出結果 // recs: 同時に録る動画（元の映像／骨格つき）
 
 async function init(){
   try{
@@ -193,7 +193,7 @@ function processFrame(ts,tSec){
   if(!recording) return;
   if(rows.length===0){ dir=c.face; lockedSide=side; }
   const an=jointAngles(c.J,dir);
-  rows.push({t:tSec,side,cx:c.x,cy:c.y,legPx:c.legPx,hip:an.hip,knee:an.knee,dx:null,dy:null,lm:lm.map(p=>[p.x*W,p.y*H,p.visibility??0])});
+  rows.push({t:tSec,frame:curFrame,side,cx:c.x,cy:c.y,legPx:c.legPx,hip:an.hip,knee:an.knee,dx:null,dy:null,lm:lm.map(p=>[p.x*W,p.y*H,p.visibility??0])});
   if(!scale){
     calLegs.push(c.legPx);
     if(calLegs.length>=CAL_N){
@@ -397,14 +397,14 @@ $('installBtn').onclick=async()=>{ if(!installEv) return; installEv.prompt(); aw
 if(!standalone && /iP(hone|ad|od)/.test(navigator.userAgent)){ $('installBox').hidden=false; $('iosHelp').hidden=false; }
 
 // ---------- 記録 ----------
-function resetRec(){ rows=[]; origin=null; lockedSide=null; trail=[]; scale=null; calLegs=[]; result=null; recs=[]; $('scaleTxt').textContent=''; $('recTxt').textContent=''; $('vY').textContent='–'; $('vX').textContent='–'; }
+function resetRec(){ sync=null; rows=[]; origin=null; lockedSide=null; trail=[]; scale=null; calLegs=[]; result=null; recs=[]; $('scaleTxt').textContent=''; $('recTxt').textContent=''; $('vY').textContent='–'; $('vX').textContent='–'; }
 $('recBtn').onclick=()=>{
   if(!recording){ resetRec(); startVideo(); recStart=performance.now(); recording=true; $('recBtn').textContent='記録停止'; $('recBtn').classList.add('on'); $('csvBtn').disabled=true; $('who').querySelector('button').disabled=true; }
   else{ recording=false; $('recBtn').textContent='記録開始'; $('recBtn').classList.remove('on'); $('who').querySelector('button').disabled=false; stopVideo().then(finish); }
 };
 function finish(){
   const data=rows.filter(r=>r.dy!==null);
-  $('csvBtn').disabled=!data.length&&!recs.some(r=>r.blob&&r.blob.size); // 数値が取れなくても動画だけは保存できる
+  $('csvBtn').disabled=!data.length&&!recs.some(r=>r.blob&&r.blob.size)&&!sync; // 数値が取れなくても動画だけは保存できる
   const raw=recs.find(r=>r.kind==='raw'&&r.blob&&r.blob.size);
   $('anaNowBtn').hidden=!raw;
   if($('mode').value!=='file'&&rtOff()){ $('summary').textContent=raw?'撮影だけ行いました。「CSV・動画を保存」で元の映像を保存できます。「この動画を解析」で、撮った動画の全コマを解析します。':'動画を保存できませんでした。'; return; }
@@ -433,23 +433,26 @@ function finish(){
 // ---------- CSV ----------
 $('csvBtn').onclick=()=>{
   const names=['nose','l_eye_in','l_eye','l_eye_out','r_eye_in','r_eye','r_eye_out','l_ear','r_ear','mouth_l','mouth_r','l_shoulder','r_shoulder','l_elbow','r_elbow','l_wrist','r_wrist','l_pinky','r_pinky','l_index','r_index','l_thumb','r_thumb','l_hip','r_hip','l_knee','r_knee','l_ankle','r_ankle','l_heel','r_heel','l_foot','r_foot'];
-  const head=['time_s','side','com_up_cm','com_fwd_cm','hip_flex_deg','knee_flex_deg','com_x_px','com_y_px','leg_px',...names.flatMap(n=>[n+'_x',n+'_y',n+'_vis'])];
+  const head=['time_s','side','com_up_cm','com_fwd_cm','hip_flex_deg','knee_flex_deg','com_x_px','com_y_px','leg_px',...names.flatMap(n=>[n+'_x',n+'_y',n+'_vis']),'frame'];
   const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
   const d=new Date(), pad=n=>String(n).padStart(2,'0');
   const base=`com_${subj.id?subj.id.replace(/[^\w-]/g,'_')+'_':''}${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   const vids=recs.filter(r=>r.blob&&r.blob.size).map(r=>({name:`${base}_${r.kind==='raw'?'raw':'skeleton'}.${r.ext}`,blob:r.blob,kind:r.kind}));
   const vname=vids.map(v=>v.name).join(' / ');
-  if(!result){ if(vids.length){ saveFiles(vids.map(v=>({name:v.name,blob:v.blob}))); } return; }
+  const syncFile=sync?{name:`${base}_sync.csv`,blob:new Blob(['\ufeff'+syncCSV(vname).join('\n')],{type:'text/csv'})}:null;
+  if(!result){ const l=vids.map(v=>({name:v.name,blob:v.blob})); if(syncFile) l.unshift(syncFile); if(l.length) saveFiles(l); return; }
   const R=result, s=(r,k)=>`${r[k].toFixed(2)},${r.t.toFixed(4)}`;
   const lines=[`# id,${q(subj.id)}`,`# age,${subj.age}`,`# sex,${subj.sex}`,`# leg_length_cm,${subj.leg}`,`# scale_cm_per_px,${scale}`,`# origin_px,${origin.x.toFixed(2)},${origin.y.toFixed(2)}`,
     `# video_file,${vname}`,`# source,${$('mode').value==='file'?'file':'camera'}`,`# fps_video,${$('mode').value==='file'?$('fps').value:''}`,`# fps_capture,${$('mode').value==='file'?$('capFps').value:''}`,
+    ...syncHead(),
     `# summary,value,time_s`,
     `# com_up_max_cm,${s(R.peak,'dy')}`,
     `# hip_flex_max_deg,${s(R.H.flex,'hip')}`,`# hip_ext_max_deg,${s(R.H.ext,'hip')}`,
     `# knee_flex_max_deg,${s(R.K.flex,'knee')}`,`# knee_ext_max_deg,${s(R.K.ext,'knee')}`,
     head.join(',')];
-  rows.filter(r=>r.dy!==null).forEach(r=>lines.push([r.t.toFixed(4),r.side,r.dy.toFixed(3),r.dx.toFixed(3),r.hip.toFixed(2),r.knee.toFixed(2),r.cx.toFixed(2),r.cy.toFixed(2),r.legPx.toFixed(2),...r.lm.flatMap(p=>[p[0].toFixed(2),p[1].toFixed(2),p[2].toFixed(3)])].join(',')));
+  rows.filter(r=>r.dy!==null).forEach(r=>lines.push([r.t.toFixed(4),r.side,r.dy.toFixed(3),r.dx.toFixed(3),r.hip.toFixed(2),r.knee.toFixed(2),r.cx.toFixed(2),r.cy.toFixed(2),r.legPx.toFixed(2),...r.lm.flatMap(p=>[p[0].toFixed(2),p[1].toFixed(2),p[2].toFixed(3)]),r.frame??''].join(',')));
   const files=[{name:`${base}.csv`,blob:new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv'})}];
+  if(syncFile) files.push(syncFile);
   vids.forEach(v=>files.push({name:v.name,blob:v.blob}));
   saveFiles(files);
 };
@@ -535,9 +538,10 @@ async function loadVideo(src,label){
   view.width=video.videoWidth; view.height=video.videoHeight;
   status('動画のfpsを調べています…');
   const f=await detectFps();
-  await seek(0); ctx.drawImage(video,0,0,view.width,view.height);
+  await seek(0); showFrame();
+  setupScrub(f||+$('fps').value||30);
   if(f){ $('fps').value=f; $('capFps').value=f; }
-  $('anaBtn').disabled=!landmarker;
+  $('anaBtn').disabled=!landmarker; $('roiBtn').disabled=false;
   status(`${label||'動画'}を読み込みました（${video.duration.toFixed(1)}秒${f?`、${f} fps`:''}）。`+(f?'':'動画のfpsを入れてください。')+'スロー撮影なら撮影時のfpsを確認して、解析開始を押してください。');
   return f;
 }
@@ -558,19 +562,105 @@ $('anaBtn').onclick=async()=>{
   video.pause();
   analyzing=true; $('anaBtn').textContent='中止'; $('fileIn').disabled=true; const keepRecs=recs; resetRec(); recs=keepRecs; recording=true;
   const n=Math.floor(video.duration*vf+1e-6), base=lastTs+1000, t0=performance.now();
+  const syncRows=($('syncOn').checked&&roi)?[]:null;
   for(let k=0;k<n && analyzing;k++){
     const tv=Math.min((k+0.5)/vf, video.duration-1e-3); // コマの真ん中に移動して、確実にそのコマを表示させる
     const tr=k/cf;                                      // 実際の時間（スロー撮影なら撮影時のfpsで換算）
-    await seek(tv); processFrame(base+tr*1000,tr);
+    await seek(tv); curFrame=k;
+    if(syncRows) syncRows.push({k,tv:k/vf,tr,lum:roiLum()});
+    processFrame(base+tr*1000,tr); if(syncRows) drawROI();
     if(k%5===0){
       const el=(performance.now()-t0)/1000, rest=el/(k+1)*(n-k-1);
       status(`解析中 ${k+1}/${n}コマ（${Math.round((k+1)/n*100)}%、残り約${Math.ceil(rest)}秒）`);
     }
   }
   const stopped=!analyzing;
-  recording=false; analyzing=false; $('anaBtn').textContent='解析開始'; $('fileIn').disabled=false;
+  recording=false; analyzing=false; curFrame=null; $('anaBtn').textContent='解析開始'; $('fileIn').disabled=false;
+  sync=syncRows&&syncRows.length?detectSync(syncRows,vf,cf):null;
   status(stopped?'解析を中止しました。':`解析が終わりました（${n}コマ、${cf} fps換算）。CSVを保存できます。`); finish();
   if(result) $('summary').textContent=`入力：動画ファイル（動画 ${vf} fps／撮影 ${cf} fps）\n`+$('summary').textContent;
+  if(sync) $('summary').textContent=syncText()+'\n'+$('summary').textContent;
+  if(sync&&!result) $('csvBtn').disabled=false;
 };
+// ---------- 同期ライトの検出 ----------
+// roi は動画の画素で持ち、保存は 0〜1 の割合で持つ（解像度が違う動画でも同じ場所になる）
+let roi=null, roiN=null, selecting=false, dragStart=null;
+try{ roiN=JSON.parse(localStorage.getItem('com_roi')||'null'); }catch(e){}
+try{ $('syncOn').checked=localStorage.getItem('com_sync')==='1'; }catch(e){}
+function syncUi(){ const on=$('syncOn').checked; $('syncHint').hidden=!on; $('roiBtn').hidden=!on; $('roiTxt').hidden=!on; $('scrubRow').hidden=!on||!video.duration; }
+$('syncOn').onchange=()=>{ try{localStorage.setItem('com_sync',$('syncOn').checked?'1':'0');}catch(e){} syncUi(); showFrame(); };
+function roiFromN(){ if(!roiN||!view.width){ roi=null; return; } roi={x:roiN.x*view.width,y:roiN.y*view.height,w:roiN.w*view.width,h:roiN.h*view.height}; }
+function roiInfo(){ $('roiTxt').textContent=roi?`範囲 ${Math.round(roi.w)}×${Math.round(roi.h)} px　明るさ ${roiLum().toFixed(0)}`:'範囲が未指定です'; }
+function drawROI(r){ r=r||roi; if(!r||!$('syncOn').checked) return; ctx.save(); ctx.lineWidth=Math.max(2,view.width/320); ctx.strokeStyle='#ffd400'; ctx.setLineDash([8,6]); ctx.strokeRect(r.x,r.y,r.w,r.h); ctx.restore(); }
+function showFrame(r){ if(!video.videoWidth) return; ctx.drawImage(video,0,0,view.width,view.height); roiFromN(); drawROI(r); if($('syncOn').checked) roiInfo(); }
+const oc=document.createElement('canvas'), octx=oc.getContext('2d',{willReadFrequently:true});
+function roiLum(){
+  if(!roi||!video.videoWidth) return NaN;
+  const sx=video.videoWidth/view.width, sy=video.videoHeight/view.height;
+  const w=Math.max(1,Math.min(64,Math.round(roi.w))), h=Math.max(1,Math.min(64,Math.round(roi.h)));
+  oc.width=w; oc.height=h; octx.drawImage(video,roi.x*sx,roi.y*sy,roi.w*sx,roi.h*sy,0,0,w,h);
+  const d=octx.getImageData(0,0,w,h).data; let s=0;
+  for(let i=0;i<d.length;i+=4) s+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  return s/(d.length/4);
+}
+// 画面上の位置 → 動画の画素（object-fit:contain の余白も考える）
+function toPx(e){
+  const b=view.getBoundingClientRect(), k=Math.min(b.width/view.width,b.height/view.height);
+  const ox=(b.width-view.width*k)/2, oy=(b.height-view.height*k)/2;
+  return {x:Math.max(0,Math.min(view.width,(e.clientX-b.left-ox)/k)),y:Math.max(0,Math.min(view.height,(e.clientY-b.top-oy)/k))};
+}
+$('roiBtn').onclick=()=>{
+  if(analyzing) return;
+  selecting=!selecting; view.style.touchAction=selecting?'none':''; view.style.cursor=selecting?'crosshair':'';
+  $('roiBtn').textContent=selecting?'囲み終わったら押す':'光る範囲を指定';
+  status(selecting?'映像の上をなぞって、ライトの場所を四角で囲んでください。':'範囲を決めました。');
+};
+view.addEventListener('pointerdown',e=>{ if(!selecting) return; e.preventDefault(); view.setPointerCapture(e.pointerId); dragStart=toPx(e); });
+view.addEventListener('pointermove',e=>{ if(!selecting||!dragStart) return; const p=toPx(e); showFrame({x:Math.min(p.x,dragStart.x),y:Math.min(p.y,dragStart.y),w:Math.abs(p.x-dragStart.x),h:Math.abs(p.y-dragStart.y)}); });
+view.addEventListener('pointerup',e=>{
+  if(!selecting||!dragStart) return; const p=toPx(e), s=dragStart; dragStart=null;
+  const r={x:Math.min(p.x,s.x),y:Math.min(p.y,s.y),w:Math.abs(p.x-s.x),h:Math.abs(p.y-s.y)};
+  if(r.w<3||r.h<3){ status('範囲が小さすぎます。もう一度なぞってください。'); showFrame(); return; }
+  roiN={x:r.x/view.width,y:r.y/view.height,w:r.w/view.width,h:r.h/view.height};
+  try{localStorage.setItem('com_roi',JSON.stringify(roiN));}catch(e){}
+  showFrame(); $('roiBtn').click();
+});
+let scrubFps=30;
+function setupScrub(f){ scrubFps=f; const n=Math.max(0,Math.floor(video.duration*f)-1); $('scrub').max=n; $('scrub').value=0; $('scrubTxt').textContent=`0 / ${n}コマ`; syncUi(); }
+$('scrub').oninput=async()=>{ if(analyzing) return; const k=+$('scrub').value; await seek(Math.min((k+0.5)/scrubFps,video.duration-1e-3)); showFrame(); $('scrubTxt').textContent=`${k} / ${$('scrub').max}コマ`; };
+// 明るさが「暗いとき」と「最も明るいとき」の中間を超えたコマを、点灯したコマとする
+function detectSync(rs,vf,cf){
+  const v=rs.map(r=>r.lum).filter(Number.isFinite).sort((a,b)=>a-b); if(!v.length) return null;
+  const lo=v[Math.floor(v.length*0.05)], hi=v[v.length-1], range=hi-lo;
+  const res={rows:rs,vf,cf,lo,hi,thr:null,events:[],roi:{...roi}};
+  if(range<15) return res; // ほとんど明るさが変わっていない
+  const on=lo+range*0.5, off=lo+range*0.3; res.thr=on; let st=false;
+  rs.forEach((r,i)=>{
+    if(!st&&r.lum>=on){ st=true; res.events.push({k:r.k,tv:r.tv,tr:r.tr,lum:r.lum,atStart:i===0}); }
+    else if(st&&r.lum<off) st=false;
+    r.on=st?1:0;
+  });
+  return res;
+}
+function syncText(){
+  if(!sync.events.length) return '同期ライト：明るさの変化が見つかりませんでした（範囲の位置を確認してください）';
+  const e=sync.events[0];
+  return `同期ライト：${e.k}コマ目（${e.tr.toFixed(4)}秒）で点灯`+(e.atStart?'（最初から点灯）':'')+(sync.events.length>1?`、ほか${sync.events.length-1}回`:'');
+}
+function syncHead(){
+  if(!sync) return [];
+  const r=sync.roi, L=[`# sync_roi_px,${r.x.toFixed(0)},${r.y.toFixed(0)},${r.w.toFixed(0)},${r.h.toFixed(0)}`,`# sync_threshold_lum,${sync.thr==null?'':sync.thr.toFixed(1)}`,`# sync_events,${sync.events.length}`];
+  if(sync.events[0]) L.push(`# sync_first_frame,${sync.events[0].k}`,`# sync_first_time_s,${sync.events[0].tr.toFixed(4)}`,`# sync_first_video_time_s,${sync.events[0].tv.toFixed(4)}`);
+  sync.events.forEach((e,i)=>L.push(`# sync_on_${i+1},frame,${e.k},time_s,${e.tr.toFixed(4)},video_time_s,${e.tv.toFixed(4)}${e.atStart?',on_at_start':''}`));
+  return L;
+}
+function syncCSV(vname){
+  const L=[`# video_file,${vname||$('fileIn').files[0]?.name||''}`,`# fps_video,${sync.vf}`,`# fps_capture,${sync.cf}`,...syncHead(),
+    '# frame: 0から数えたコマ番号 / video_time_s: 動画ファイル上の時間 / time_s: 実際の時間（スロー撮影は撮影時のfpsで換算）',
+    'frame,video_time_s,time_s,roi_lum,light_on'];
+  sync.rows.forEach(r=>L.push([r.k,r.tv.toFixed(4),r.tr.toFixed(4),Number.isFinite(r.lum)?r.lum.toFixed(2):'',r.on??''].join(',')));
+  return L;
+}
+syncUi();
 window.addEventListener('resize',()=>{drawChart();drawChart2();});
 })();
