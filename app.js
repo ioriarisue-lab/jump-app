@@ -211,6 +211,7 @@ function processFrame(ts,tSec){
   const ang=angOf(recording&&rows.length?dir:c.face);
   $('vHip').textContent=ang.hip.toFixed(0); $('vKnee').textContent=ang.knee.toFixed(0);
   drawBody(c,W);
+  if(curFrame!=null) frameDraw[curFrame]=c; // あとで骨格つき動画を作るために取っておく
   trail.push({x:c.x,y:c.y}); if(trail.length>90) trail.shift();
   if(!recording) return;
   if(rows.length===0){ dir=c.face; lockedSide=side; }
@@ -244,7 +245,7 @@ function drawBody(c,W){
   trail.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
   ctx.fillStyle=css('--com'); ctx.beginPath(); ctx.arc(c.x,c.y,lw*4,0,Math.PI*2); ctx.fill();
   ctx.strokeStyle='#fff'; ctx.stroke();
-  if(recording&&origin){ ctx.setLineDash([lw*3,lw*3]); ctx.strokeStyle='rgba(255,255,255,.6)';
+  if((recording||rendering)&&origin){ ctx.setLineDash([lw*3,lw*3]); ctx.strokeStyle='rgba(255,255,255,.6)';
     ctx.beginPath(); ctx.moveTo(0,origin.y); ctx.lineTo(W,origin.y); ctx.stroke(); ctx.setLineDash([]); }
 }
 function drawChart(){
@@ -589,7 +590,7 @@ $('anaNowBtn').onclick=async()=>{
   if(landmarker) $('anaBtn').click();
 };
 const seek=t=>new Promise(r=>{ let ok=false; const h=()=>{ if(ok) return; ok=true; video.onseeked=null; r(); }; video.onseeked=h; video.currentTime=t; setTimeout(h,3000); });
-let analyzing=false, rng={a:null,b:null}, anaRange=null;
+let analyzing=false, rng={a:null,b:null}, anaRange=null, frameDraw={}, rendering=false;
 $('anaBtn').onclick=async()=>{
   if(analyzing){ analyzing=false; return; }
   const vf=+$('fps').value, cf=+$('capFps').value||vf;
@@ -599,7 +600,7 @@ $('anaBtn').onclick=async()=>{
   const N=Math.floor(video.duration*vf+1e-6), base=lastTs+1000, t0=performance.now();
   const ka=Math.max(0,Math.min(N-1,rng.a??0)), kb=Math.max(ka,Math.min(N-1,rng.b??N-1)), n=kb-ka+1; // 解析する区間（コマ番号）
   anaRange={a:ka,b:kb,all:ka===0&&kb===N-1};
-  const syncRows=($('syncOn').checked&&roi)?[]:null;
+  const syncRows=($('syncOn').checked&&roi)?[]:null; frameDraw={};
   for(let k=ka,i=0;k<=kb && analyzing;k++,i++){
     const tv=Math.min((k+0.5)/vf, video.duration-1e-3); // コマの真ん中に移動して、確実にそのコマを表示させる
     const tr=k/cf;                                      // 実際の時間（スロー撮影なら撮影時のfpsで換算）
@@ -612,13 +613,55 @@ $('anaBtn').onclick=async()=>{
     }
   }
   const stopped=!analyzing;
-  recording=false; analyzing=false; curFrame=null; $('anaBtn').textContent='解析開始'; $('fileIn').disabled=false;
+  recording=false; curFrame=null;
+  if(!stopped&&$('ovOn').checked&&Object.keys(frameDraw).length) await renderOverlay(ka,kb,vf);
+  analyzing=false; $('anaBtn').textContent='解析開始'; $('fileIn').disabled=false;
   sync=syncRows&&syncRows.length?detectSync(syncRows,vf,cf):null;
   status(stopped?'解析を中止しました。':`解析が終わりました（${n}コマ、${cf} fps換算）。CSVを保存できます。`); finish();
   if(result) $('summary').textContent=`入力：動画ファイル（動画 ${vf} fps／撮影 ${cf} fps）`+(anaRange.all?'':`　解析区間 ${ka}〜${kb}コマ（${(ka/cf).toFixed(2)}〜${(kb/cf).toFixed(2)}秒）`)+`\n`+$('summary').textContent;
   if(sync) $('summary').textContent=syncText()+'\n'+$('summary').textContent;
   if(sync&&!result) $('csvBtn').disabled=false;
 };
+// ---------- 解析した動画から骨格つき動画を作る ----------
+// 解析はコマ送りで行うので、そのままでは録画できない。解析後に動画を等速で再生し、取っておいた骨格を重ねて録画する
+async function renderOverlay(ka,kb,vf){
+  const mime=pickMime();
+  if(mime===null||!view.captureStream||!window.MediaRecorder){ status('この端末は骨格つき動画の作成に未対応です。'); return; }
+  const W=view.width,H=view.height, tEnd=Math.min((kb+1)/vf,video.duration), len=Math.max(0.1,tEnd-ka/vf);
+  let last=-1; trail=[];
+  const drawAt=t=>{
+    const k=Math.max(ka,Math.min(kb,Math.floor(t*vf+1e-6)));
+    ctx.drawImage(video,0,0,W,H);
+    const c=frameDraw[k];
+    if(c){ if(k!==last){ trail.push({x:c.x,y:c.y}); if(trail.length>90) trail.shift(); last=k; } drawBody(c,W); }
+    drawROI();
+  };
+  await seek(Math.min((ka+0.5)/vf,video.duration-1e-3)); rendering=true; drawAt(ka/vf);
+  const r=startOne('overlay',view.captureStream(30),mime);
+  if(!r){ rendering=false; status('骨格つき動画を作成できませんでした。'); return; }
+  await new Promise(res=>{
+    let done=false; const end=()=>{ if(done) return; done=true; video.onended=null; res(); };
+    const step=(now,md)=>{
+      if(done) return; if(!analyzing){ end(); return; }
+      const t=md?md.mediaTime:video.currentTime; drawAt(t);
+      status(`骨格つき動画を作成中 ${Math.min(100,Math.round((t-ka/vf)/len*100))}%`);
+      if(video.ended||t>=tEnd-0.5/vf){ end(); return; }
+      next();
+    };
+    const next=()=>video.requestVideoFrameCallback?video.requestVideoFrameCallback(step):requestAnimationFrame(()=>step());
+    video.onended=end; video.muted=true; video.playbackRate=1; next();
+    video.play().catch(end); setTimeout(end,(len+10)*1000);
+  });
+  video.pause(); await new Promise(r=>setTimeout(r,300)); // 最後のコマが録画に入るのを待つ
+  await new Promise(res=>{ const fin=()=>{ r.blob=new Blob(r.chunks,{type:r.type}); r.chunks=[]; res(); }; if(r.rec.state==='inactive') fin(); else{ r.rec.onstop=fin; r.rec.stop(); } });
+  rendering=false;
+  if(r.blob.size){ recs=recs.filter(x=>x.kind!=='overlay'); recs.push(r); }
+  const ok=recs.filter(x=>x.blob&&x.blob.size);
+  $('recTxt').textContent=ok.map(x=>`${x.kind==='raw'?'元の映像':'骨格つき'} ${(x.blob.size/1e6).toFixed(1)} MB`).join('　');
+}
+try{ const o=localStorage.getItem('com_ov'); if(o) $('ovOn').checked=o==='1'; }catch(e){}
+$('ovOn').onchange=()=>{ try{localStorage.setItem('com_ov',$('ovOn').checked?'1':'0');}catch(e){} };
+
 // ---------- 同期ライトの検出 ----------
 // roi は動画の画素で持ち、保存は 0〜1 の割合で持つ（解像度が違う動画でも同じ場所になる）
 let roi=null, roiN=null, selecting=false, dragStart=null;

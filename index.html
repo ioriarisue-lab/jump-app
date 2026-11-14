@@ -192,6 +192,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
           <button id="anaBtn" disabled>解析開始</button>
         </div>
         <div class="row" style="margin-top:8px">
+          <label><input type="checkbox" id="ovOn" checked> 骨格つき動画も作る</label>
+          <span class="hint">解析のあと、動画をもう一度再生しながら作ります（動画の長さと同じ時間がかかります）。</span>
+        </div>
+        <div class="row" style="margin-top:8px">
           <label><input type="checkbox" id="syncOn"> 同期ライトを検出する</label>
           <button id="roiBtn" disabled>光る範囲を指定</button>
           <span class="hint" id="roiTxt"></span>
