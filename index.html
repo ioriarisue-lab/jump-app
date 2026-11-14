@@ -114,7 +114,7 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
 </head>
 <body>
 <header>
-  <h1>着地時の重心計測（矢状面）</h1>
+  <h1>着地時の重心計測（矢状面） <small id="ver" style="font-size:11px;font-weight:400;opacity:.6"></small></h1>
   <span id="who" class="hidden"></span>
   <p id="status">準備中…</p>
 </header>
@@ -176,6 +176,16 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
       </div>
       <div id="fileBox" style="display:none">
         <div class="row"><input type="file" id="fileIn" accept="video/*"></div>
+        <div id="rangeBox" hidden>
+          <div class="row"><label style="flex:1;display:flex;gap:6px;align-items:center">コマ送り <input type="range" id="scrub" min="0" max="0" value="0" step="1" style="flex:1"></label><span class="hint" id="scrubTxt"></span></div>
+          <div class="row">
+            <button id="rngA">ここから</button>
+            <button id="rngB">ここまで</button>
+            <button id="rngAll">全体に戻す</button>
+            <span class="hint" id="rngTxt"></span>
+          </div>
+          <p class="hint">「コマ送り」で場面を選び、「ここから」「ここまで」で解析する区間を決めます。区間の最初に、静止立位が約1秒入るようにしてください。</p>
+        </div>
         <div class="row">
           <label>動画のfps <input type="number" id="fps" value="30" min="10" max="480" step="any" style="width:5em"></label>
           <label>撮影時のfps <input type="number" id="capFps" value="30" min="10" max="960" step="any" style="width:5em"></label>
@@ -186,7 +196,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
           <button id="roiBtn" disabled>光る範囲を指定</button>
           <span class="hint" id="roiTxt"></span>
         </div>
-        <div class="row" id="scrubRow" hidden><label style="flex:1;display:flex;gap:6px;align-items:center">コマ送り <input type="range" id="scrub" min="0" max="0" value="0" step="1" style="flex:1"></label><span class="hint" id="scrubTxt"></span></div>
         <p class="hint" id="syncHint" hidden>ほかの機器と同期させるためのライト（LEDなど）が映る場所を、映像の上で指やマウスでなぞって四角で囲んでください。ライトの本体が見えるコマで囲むと確実です。解析のとき、その範囲が明るくなった瞬間のコマ番号と時間をCSVに書き出します。</p>
         <p class="hint" id="fpsHint">動画のfpsは読み込み時に自動で入ります。スロー撮影で動画のfpsが30などになっている場合は、撮影時のfps（120や240）を入れてください。全コマを解析します。</p>
       </div>

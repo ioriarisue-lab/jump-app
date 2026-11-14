@@ -1,7 +1,7 @@
 // オフライン用に保存するファイルの一覧（Service Worker と画面の両方で使う）
 // アプリを更新したら VERSION を変えてください（例：jump-m2）
 self.PRECACHE={
-  VERSION:'jump-m7',
+  VERSION:'jump-m8',
   // アプリ本体（このフォルダのファイル）
   LOCAL:['./','./index.html','./app.js','./precache.js','./manifest.webmanifest',
     './icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png'],

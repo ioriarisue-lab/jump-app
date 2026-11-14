@@ -444,6 +444,7 @@ $('csvBtn').onclick=()=>{
   const R=result, s=(r,k)=>`${r[k].toFixed(2)},${r.t.toFixed(4)}`;
   const lines=[`# id,${q(subj.id)}`,`# age,${subj.age}`,`# sex,${subj.sex}`,`# leg_length_cm,${subj.leg}`,`# scale_cm_per_px,${scale}`,`# origin_px,${origin.x.toFixed(2)},${origin.y.toFixed(2)}`,
     `# video_file,${vname}`,`# source,${$('mode').value==='file'?'file':'camera'}`,`# fps_video,${$('mode').value==='file'?$('fps').value:''}`,`# fps_capture,${$('mode').value==='file'?$('capFps').value:''}`,
+    `# app_version,${PC.VERSION}`,`# analysis_range_frames,${$('mode').value==='file'&&anaRange?anaRange.a+','+anaRange.b:''}`,
     ...syncHead(),
     `# summary,value,time_s`,
     `# com_up_max_cm,${s(R.peak,'dy')}`,
@@ -554,31 +555,33 @@ $('anaNowBtn').onclick=async()=>{
   if(landmarker) $('anaBtn').click();
 };
 const seek=t=>new Promise(r=>{ let ok=false; const h=()=>{ if(ok) return; ok=true; video.onseeked=null; r(); }; video.onseeked=h; video.currentTime=t; setTimeout(h,3000); });
-let analyzing=false;
+let analyzing=false, rng={a:null,b:null}, anaRange=null;
 $('anaBtn').onclick=async()=>{
   if(analyzing){ analyzing=false; return; }
   const vf=+$('fps').value, cf=+$('capFps').value||vf;
   if(!(vf>0)){ status('動画のfpsを入れてください。'); return; }
   video.pause();
   analyzing=true; $('anaBtn').textContent='中止'; $('fileIn').disabled=true; const keepRecs=recs; resetRec(); recs=keepRecs; recording=true;
-  const n=Math.floor(video.duration*vf+1e-6), base=lastTs+1000, t0=performance.now();
+  const N=Math.floor(video.duration*vf+1e-6), base=lastTs+1000, t0=performance.now();
+  const ka=Math.max(0,Math.min(N-1,rng.a??0)), kb=Math.max(ka,Math.min(N-1,rng.b??N-1)), n=kb-ka+1; // 解析する区間（コマ番号）
+  anaRange={a:ka,b:kb,all:ka===0&&kb===N-1};
   const syncRows=($('syncOn').checked&&roi)?[]:null;
-  for(let k=0;k<n && analyzing;k++){
+  for(let k=ka,i=0;k<=kb && analyzing;k++,i++){
     const tv=Math.min((k+0.5)/vf, video.duration-1e-3); // コマの真ん中に移動して、確実にそのコマを表示させる
     const tr=k/cf;                                      // 実際の時間（スロー撮影なら撮影時のfpsで換算）
     await seek(tv); curFrame=k;
     if(syncRows) syncRows.push({k,tv:k/vf,tr,lum:roiLum()});
     processFrame(base+tr*1000,tr); if(syncRows) drawROI();
     if(k%5===0){
-      const el=(performance.now()-t0)/1000, rest=el/(k+1)*(n-k-1);
-      status(`解析中 ${k+1}/${n}コマ（${Math.round((k+1)/n*100)}%、残り約${Math.ceil(rest)}秒）`);
+      const el=(performance.now()-t0)/1000, rest=el/(i+1)*(n-i-1);
+      status(`解析中 ${i+1}/${n}コマ（${Math.round((i+1)/n*100)}%、残り約${Math.ceil(rest)}秒）`);
     }
   }
   const stopped=!analyzing;
   recording=false; analyzing=false; curFrame=null; $('anaBtn').textContent='解析開始'; $('fileIn').disabled=false;
   sync=syncRows&&syncRows.length?detectSync(syncRows,vf,cf):null;
   status(stopped?'解析を中止しました。':`解析が終わりました（${n}コマ、${cf} fps換算）。CSVを保存できます。`); finish();
-  if(result) $('summary').textContent=`入力：動画ファイル（動画 ${vf} fps／撮影 ${cf} fps）\n`+$('summary').textContent;
+  if(result) $('summary').textContent=`入力：動画ファイル（動画 ${vf} fps／撮影 ${cf} fps）`+(anaRange.all?'':`　解析区間 ${ka}〜${kb}コマ（${(ka/cf).toFixed(2)}〜${(kb/cf).toFixed(2)}秒）`)+`\n`+$('summary').textContent;
   if(sync) $('summary').textContent=syncText()+'\n'+$('summary').textContent;
   if(sync&&!result) $('csvBtn').disabled=false;
 };
@@ -587,7 +590,7 @@ $('anaBtn').onclick=async()=>{
 let roi=null, roiN=null, selecting=false, dragStart=null;
 try{ roiN=JSON.parse(localStorage.getItem('com_roi')||'null'); }catch(e){}
 try{ $('syncOn').checked=localStorage.getItem('com_sync')==='1'; }catch(e){}
-function syncUi(){ const on=$('syncOn').checked; $('syncHint').hidden=!on; $('roiBtn').hidden=!on; $('roiTxt').hidden=!on; $('scrubRow').hidden=!on||!video.duration; }
+function syncUi(){ const on=$('syncOn').checked; $('syncHint').hidden=!on; $('roiBtn').hidden=!on; $('roiTxt').hidden=!on; }
 $('syncOn').onchange=()=>{ try{localStorage.setItem('com_sync',$('syncOn').checked?'1':'0');}catch(e){} syncUi(); showFrame(); };
 function roiFromN(){ if(!roiN||!view.width){ roi=null; return; } roi={x:roiN.x*view.width,y:roiN.y*view.height,w:roiN.w*view.width,h:roiN.h*view.height}; }
 function roiInfo(){ $('roiTxt').textContent=roi?`範囲 ${Math.round(roi.w)}×${Math.round(roi.h)} px　明るさ ${roiLum().toFixed(0)}`:'範囲が未指定です'; }
@@ -614,6 +617,7 @@ $('roiBtn').onclick=()=>{
   selecting=!selecting; view.style.touchAction=selecting?'none':''; view.style.cursor=selecting?'crosshair':'';
   $('roiBtn').textContent=selecting?'囲み終わったら押す':'光る範囲を指定';
   status(selecting?'映像の上をなぞって、ライトの場所を四角で囲んでください。':'範囲を決めました。');
+  if(selecting) view.scrollIntoView({block:'center'});
 };
 view.addEventListener('pointerdown',e=>{ if(!selecting) return; e.preventDefault(); view.setPointerCapture(e.pointerId); dragStart=toPx(e); });
 view.addEventListener('pointermove',e=>{ if(!selecting||!dragStart) return; const p=toPx(e); showFrame({x:Math.min(p.x,dragStart.x),y:Math.min(p.y,dragStart.y),w:Math.abs(p.x-dragStart.x),h:Math.abs(p.y-dragStart.y)}); });
@@ -626,8 +630,20 @@ view.addEventListener('pointerup',e=>{
   showFrame(); $('roiBtn').click();
 });
 let scrubFps=30;
-function setupScrub(f){ scrubFps=f; const n=Math.max(0,Math.floor(video.duration*f)-1); $('scrub').max=n; $('scrub').value=0; $('scrubTxt').textContent=`0 / ${n}コマ`; syncUi(); }
-$('scrub').oninput=async()=>{ if(analyzing) return; const k=+$('scrub').value; await seek(Math.min((k+0.5)/scrubFps,video.duration-1e-3)); showFrame(); $('scrubTxt').textContent=`${k} / ${$('scrub').max}コマ`; };
+function rngShow(){
+  const n=+$('scrub').max, a=rng.a??0, b=rng.b??n, cf=+$('capFps').value||scrubFps;
+  $('rngTxt').textContent=(rng.a==null&&rng.b==null)?`解析区間：全体（0〜${n}コマ）`:`解析区間：${a}〜${b}コマ（${(a/cf).toFixed(2)}〜${(b/cf).toFixed(2)}秒、${b-a+1}コマ）`;
+}
+function setupScrub(f){ scrubFps=f; rng={a:null,b:null}; const n=Math.max(0,Math.floor(video.duration*f+1e-6)-1); $('scrub').max=n; $('scrub').value=0; $('scrubTxt').textContent=`0 / ${n}コマ`; $('rangeBox').hidden=false; rngShow(); syncUi(); }
+async function scrubTo(k){ await seek(Math.min((k+0.5)/scrubFps,video.duration-1e-3)); showFrame(); $('scrubTxt').textContent=`${k} / ${$('scrub').max}コマ`; }
+$('scrub').oninput=()=>{ if(!analyzing) scrubTo(+$('scrub').value); };
+$('rngA').onclick=()=>{ if(analyzing) return; rng.a=+$('scrub').value; if(rng.b!=null&&rng.b<rng.a) rng.b=null; rngShow(); };
+$('rngB').onclick=()=>{ if(analyzing) return; rng.b=+$('scrub').value; if(rng.a!=null&&rng.a>rng.b) rng.a=null; rngShow(); };
+$('rngAll').onclick=()=>{ if(analyzing) return; rng={a:null,b:null}; rngShow(); };
+// 動画のfpsを手で直したら、コマ番号が変わるので区間を決め直す
+$('fps').onchange=()=>{ const f=+$('fps').value; if(f>0&&video.duration&&$('mode').value==='file'&&!analyzing){ setupScrub(f); scrubTo(0); } };
+$('capFps').onchange=()=>{ if(video.duration) rngShow(); };
+$('ver').textContent=PC.VERSION;
 // 明るさが「暗いとき」と「最も明るいとき」の中間を超えたコマを、点灯したコマとする
 function detectSync(rs,vf,cf){
   const v=rs.map(r=>r.lum).filter(Number.isFinite).sort((a,b)=>a-b); if(!v.length) return null;
