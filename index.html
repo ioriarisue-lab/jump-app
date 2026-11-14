@@ -200,7 +200,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid 
         <p class="hint" id="fpsHint">動画のfpsは読み込み時に自動で入ります。スロー撮影で動画のfpsが30などになっている場合は、撮影時のfps（120や240）を入れてください。全コマを解析します。</p>
       </div>
       <div class="row">
-        <label>計測側 <select id="sideSel"><option value="auto">自動</option><option value="L">左</option><option value="R">右</option></select></label>
+        <label>計測側 <select id="sideSel"><option value="auto">自動</option><option value="L">左</option><option value="R">右</option><option value="B">両側</option></select></label>
+        <label>座標の原点 <select id="orgSel"><option value="br">右下</option><option value="bl">左下</option><option value="tl">左上</option></select></label>
+        <span class="hint" id="sideHint" hidden>左右それぞれの関節位置で重心を求め、股・膝の角度を左右別に出します。真横からの撮影では、奥側の脚は隠れて精度が下がります。</span>
       </div>
     </div>
 

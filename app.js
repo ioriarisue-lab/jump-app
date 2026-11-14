@@ -150,7 +150,27 @@ function pickSide(lm){
   if(curSide==='L' && r>l+0.5) curSide='R'; else if(curSide==='R' && l>r+0.5) curSide='L';
   return curSide;
 }
+function sideJ(lm,W,H,o){
+  const P=i=>{const p=lm[i+o];return {x:p.x*W,y:p.y*H,v:p.visibility??1}};
+  return {ear:P(7),sh:P(11),el:P(13),wr:P(15),pk:P(17),ix:P(19),hp:P(23),kn:P(25),an:P(27),he:P(29),to:P(31)};
+}
+// 両側：左右それぞれの関節位置を使う（片側を2倍にしない）
+function computeBoth(lm,W,H,sex){
+  const A=sideJ(lm,W,H,0), B=sideJ(lm,W,H,1);
+  const ok=J=>![J.sh,J.hp,J.kn,J.an].some(p=>p.v<VIS);
+  if(!ok(A)&&!ok(B)) return null; // 少なくとも片側ははっきり見えていること
+  const t=AE[sex], L=(a,b,r)=>({x:a.x+(b.x-a.x)*r,y:a.y+(b.y-a.y)*r}), M=(a,b)=>L(a,b,.5);
+  const segs=[[t.head[0],M(A.ear,B.ear)],[t.trunk[0],L(M(A.sh,B.sh),M(A.hp,B.hp),t.trunk[1])]];
+  for(const J of [A,B]) segs.push([t.uarm[0],L(J.sh,J.el,t.uarm[1])],[t.farm[0],L(J.el,J.wr,t.farm[1])],[t.hand[0],L(J.pk,J.ix,.5)],
+    [t.thigh[0],L(J.hp,J.kn,t.thigh[1])],[t.shank[0],L(J.kn,J.an,t.shank[1])],[t.foot[0],L(J.he,J.to,t.foot[1])]);
+  let m=0,x=0,y=0; for(const [w,p] of segs){m+=w;x+=w*p.x;y+=w*p.y;}
+  const leg=J=>Math.hypot(J.hp.x-J.kn.x,J.hp.y-J.kn.y)+Math.hypot(J.kn.x-J.an.x,J.kn.y-J.an.y);
+  const visOf=J=>[J.sh,J.hp,J.kn,J.an].reduce((s,p)=>s+p.v,0)/4;
+  return {x:x/m,y:y/m,J:visOf(A)>=visOf(B)?A:B,JL:A,JR:B,visL:visOf(A),visR:visOf(B),legPx:(leg(A)+leg(B))/2,
+    face:((A.to.x-A.he.x)+(B.to.x-B.he.x)>0)?1:-1};
+}
 function computeCOM(lm,W,H,side,sex){
+  if(side==='B') return computeBoth(lm,W,H,sex);
   const o=side==='L'?0:1;
   const P=i=>{const p=lm[i+o];return {x:p.x*W,y:p.y*H,v:p.visibility??1}};
   const J={ear:P(7),sh:P(11),el:P(13),wr:P(15),pk:P(17),ix:P(19),hp:P(23),kn:P(25),an:P(27),he:P(29),to:P(31)};
@@ -186,14 +206,16 @@ function processFrame(ts,tSec){
   if(!res.landmarks||!res.landmarks[0]) return;
   const lm=res.landmarks[0], side=pickSide(lm), c=computeCOM(lm,W,H,side,subj.sex);
   if(!c) return;
-  const ang=jointAngles(c.J,recording&&rows.length?dir:c.face);
+  const angOf=f=>{ if(!c.JL) return jointAngles(c.J,f);
+    const l=jointAngles(c.JL,f), r=jointAngles(c.JR,f); return {hip:(l.hip+r.hip)/2,knee:(l.knee+r.knee)/2,l,r}; }; // 両側のときは左右の平均を代表値にする
+  const ang=angOf(recording&&rows.length?dir:c.face);
   $('vHip').textContent=ang.hip.toFixed(0); $('vKnee').textContent=ang.knee.toFixed(0);
   drawBody(c,W);
   trail.push({x:c.x,y:c.y}); if(trail.length>90) trail.shift();
   if(!recording) return;
   if(rows.length===0){ dir=c.face; lockedSide=side; }
-  const an=jointAngles(c.J,dir);
-  rows.push({t:tSec,frame:curFrame,side,cx:c.x,cy:c.y,legPx:c.legPx,hip:an.hip,knee:an.knee,dx:null,dy:null,lm:lm.map(p=>[p.x*W,p.y*H,p.visibility??0])});
+  const an=angOf(dir);
+  rows.push({t:tSec,frame:curFrame,side,cx:c.x,cy:c.y,legPx:c.legPx,hip:an.hip,knee:an.knee,hipL:an.l?.hip,kneeL:an.l?.knee,hipR:an.r?.hip,kneeR:an.r?.knee,visL:c.visL,visR:c.visR,dx:null,dy:null,lm:lm.map(p=>[p.x*W,p.y*H,p.visibility??0])});
   if(!scale){
     calLegs.push(c.legPx);
     if(calLegs.length>=CAL_N){
@@ -213,9 +235,10 @@ function setDisp(r){ r.dx=dir*(r.cx-origin.x)*scale; r.dy=-(r.cy-origin.y)*scale
 // ---------- 描画 ----------
 function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
 function drawBody(c,W){
-  const J=c.J, lw=Math.max(2,W/400);
+  const lw=Math.max(2,W/400);
   ctx.strokeStyle=css('--bone'); ctx.lineWidth=lw; ctx.beginPath();
-  [[J.ear,J.sh],[J.sh,J.el],[J.el,J.wr],[J.sh,J.hp],[J.hp,J.kn],[J.kn,J.an],[J.an,J.he],[J.he,J.to]].forEach(([a,b])=>{ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);});
+  (c.JL?[c.JL,c.JR]:[c.J]).forEach(J=>[[J.ear,J.sh],[J.sh,J.el],[J.el,J.wr],[J.sh,J.hp],[J.hp,J.kn],[J.kn,J.an],[J.an,J.he],[J.he,J.to]].forEach(([a,b])=>{ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}));
+  if(c.JL){ [[c.JL.sh,c.JR.sh],[c.JL.hp,c.JR.hp]].forEach(([a,b])=>{ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}); }
   ctx.stroke();
   ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.beginPath();
   trail.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
@@ -415,7 +438,9 @@ function finish(){
   const dur=data[data.length-1].t-data[0].t;
   const ext=k=>{let mx=data[0],mn=data[0];data.forEach(r=>{if(r[k]>mx[k])mx=r;if(r[k]<mn[k])mn=r;});return {flex:mx,ext:mn};};
   const H=ext('hip'), K=ext('knee');
-  result={peak:mx,low,H,K};
+  const both=data[0].side==='B';
+  result={peak:mx,low,H,K,both};
+  if(both){ result.HL=ext('hipL'); result.HR=ext('hipR'); result.KL=ext('kneeL'); result.KR=ext('kneeR'); }
   const fm=(r,k)=>`${r[k].toFixed(1)}°（${r.t.toFixed(2)}秒）`;
   $('summary').textContent=
 `フレーム数 ${data.length}（${dur.toFixed(2)}秒、平均 ${(data.length/Math.max(dur,1e-6)).toFixed(0)}fps）
@@ -426,23 +451,31 @@ function finish(){
 股関節屈曲　最大屈曲 ${fm(H.flex,'hip')}　最大伸展 ${fm(H.ext,'hip')}
 膝関節屈曲　最大屈曲 ${fm(K.flex,'knee')}　最大伸展 ${fm(K.ext,'knee')}
 
-計測側 ${data[0].side==='L'?'左':'右'}　換算 ${scale.toFixed(4)} cm/px`;
+計測側 ${both?'両側':data[0].side==='L'?'左':'右'}　換算 ${scale.toFixed(4)} cm/px`
+  +(both?`\n\n左右別の最大屈曲（上の股・膝は左右の平均）
+左　股 ${fm(result.HL.flex,'hipL')}　膝 ${fm(result.KL.flex,'kneeL')}
+右　股 ${fm(result.HR.flex,'hipR')}　膝 ${fm(result.KR.flex,'kneeR')}
+見えやすさ（0〜1）　左 ${(data.reduce((s,r)=>s+r.visL,0)/data.length).toFixed(2)}　右 ${(data.reduce((s,r)=>s+r.visR,0)/data.length).toFixed(2)}`:'');
   drawChart(); drawChart2();
 }
 
 // ---------- CSV ----------
 $('csvBtn').onclick=()=>{
   const names=['nose','l_eye_in','l_eye','l_eye_out','r_eye_in','r_eye','r_eye_out','l_ear','r_ear','mouth_l','mouth_r','l_shoulder','r_shoulder','l_elbow','r_elbow','l_wrist','r_wrist','l_pinky','r_pinky','l_index','r_index','l_thumb','r_thumb','l_hip','r_hip','l_knee','r_knee','l_ankle','r_ankle','l_heel','r_heel','l_foot','r_foot'];
-  const head=['time_s','side','com_up_cm','com_fwd_cm','hip_flex_deg','knee_flex_deg','com_x_px','com_y_px','leg_px',...names.flatMap(n=>[n+'_x',n+'_y',n+'_vis']),'frame'];
+  const head=['time_s','side','com_up_cm','com_fwd_cm','hip_flex_deg','knee_flex_deg','com_x_px','com_y_px','leg_px',...names.flatMap(n=>[n+'_x',n+'_y',n+'_vis']),'frame','hip_flex_l_deg','knee_flex_l_deg','hip_flex_r_deg','knee_flex_r_deg'];
   const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
   const d=new Date(), pad=n=>String(n).padStart(2,'0');
   const base=`com_${subj.id?subj.id.replace(/[^\w-]/g,'_')+'_':''}${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   const vids=recs.filter(r=>r.blob&&r.blob.size).map(r=>({name:`${base}_${r.kind==='raw'?'raw':'skeleton'}.${r.ext}`,blob:r.blob,kind:r.kind}));
-  const vname=vids.map(v=>v.name).join(' / ');
+  const vname=vids.map(v=>v.name).join(' / ')||($('mode').value==='file'&&$('fileIn').files[0]?$('fileIn').files[0].name:'');
   const syncFile=sync?{name:`${base}_sync.csv`,blob:new Blob(['\ufeff'+syncCSV(vname).join('\n')],{type:'text/csv'})}:null;
   if(!result){ const l=vids.map(v=>({name:v.name,blob:v.blob})); if(syncFile) l.unshift(syncFile); if(l.length) saveFiles(l); return; }
   const R=result, s=(r,k)=>`${r[k].toFixed(2)},${r.t.toFixed(4)}`;
-  const lines=[`# id,${q(subj.id)}`,`# age,${subj.age}`,`# sex,${subj.sex}`,`# leg_length_cm,${subj.leg}`,`# scale_cm_per_px,${scale}`,`# origin_px,${origin.x.toFixed(2)},${origin.y.toFixed(2)}`,
+  // 書き出す座標の原点（解析は画像の左上を原点にしたまま行い、書き出すときだけ変換する）
+  const og=$('orgSel').value, IW=view.width, IH=view.height;
+  const tx=x=>og==='br'?IW-x:x, ty=y=>og==='tl'?y:IH-y;
+  const ogName={br:'bottom_right',bl:'bottom_left',tl:'top_left'}[og];
+  const lines=[`# id,${q(subj.id)}`,`# age,${subj.age}`,`# sex,${subj.sex}`,`# leg_length_cm,${subj.leg}`,`# scale_cm_per_px,${scale}`,`# coord_origin,${ogName},x_positive,${og==='br'?'left':'right'},y_positive,${og==='tl'?'down':'up'}`,`# image_size_px,${IW},${IH}`,`# origin_px,${tx(origin.x).toFixed(2)},${ty(origin.y).toFixed(2)}`,
     `# video_file,${vname}`,`# source,${$('mode').value==='file'?'file':'camera'}`,`# fps_video,${$('mode').value==='file'?$('fps').value:''}`,`# fps_capture,${$('mode').value==='file'?$('capFps').value:''}`,
     `# app_version,${PC.VERSION}`,`# analysis_range_frames,${$('mode').value==='file'&&anaRange?anaRange.a+','+anaRange.b:''}`,
     ...syncHead(),
@@ -450,8 +483,9 @@ $('csvBtn').onclick=()=>{
     `# com_up_max_cm,${s(R.peak,'dy')}`,
     `# hip_flex_max_deg,${s(R.H.flex,'hip')}`,`# hip_ext_max_deg,${s(R.H.ext,'hip')}`,
     `# knee_flex_max_deg,${s(R.K.flex,'knee')}`,`# knee_ext_max_deg,${s(R.K.ext,'knee')}`,
+    ...(R.both?[`# hip_flex_l_max_deg,${s(R.HL.flex,'hipL')}`,`# knee_flex_l_max_deg,${s(R.KL.flex,'kneeL')}`,`# hip_flex_r_max_deg,${s(R.HR.flex,'hipR')}`,`# knee_flex_r_max_deg,${s(R.KR.flex,'kneeR')}`]:[]),
     head.join(',')];
-  rows.filter(r=>r.dy!==null).forEach(r=>lines.push([r.t.toFixed(4),r.side,r.dy.toFixed(3),r.dx.toFixed(3),r.hip.toFixed(2),r.knee.toFixed(2),r.cx.toFixed(2),r.cy.toFixed(2),r.legPx.toFixed(2),...r.lm.flatMap(p=>[p[0].toFixed(2),p[1].toFixed(2),p[2].toFixed(3)]),r.frame??''].join(',')));
+  rows.filter(r=>r.dy!==null).forEach(r=>lines.push([r.t.toFixed(4),r.side,r.dy.toFixed(3),r.dx.toFixed(3),r.hip.toFixed(2),r.knee.toFixed(2),tx(r.cx).toFixed(2),ty(r.cy).toFixed(2),r.legPx.toFixed(2),...r.lm.flatMap(p=>[tx(p[0]).toFixed(2),ty(p[1]).toFixed(2),p[2].toFixed(3)]),r.frame??'',...['hipL','kneeL','hipR','kneeR'].map(k=>r[k]==null?'':r[k].toFixed(2))].join(',')));
   const files=[{name:`${base}.csv`,blob:new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv'})}];
   if(syncFile) files.push(syncFile);
   vids.forEach(v=>files.push({name:v.name,blob:v.blob}));
@@ -644,6 +678,9 @@ $('rngAll').onclick=()=>{ if(analyzing) return; rng={a:null,b:null}; rngShow(); 
 $('fps').onchange=()=>{ const f=+$('fps').value; if(f>0&&video.duration&&$('mode').value==='file'&&!analyzing){ setupScrub(f); scrubTo(0); } };
 $('capFps').onchange=()=>{ if(video.duration) rngShow(); };
 $('ver').textContent=PC.VERSION;
+try{ const o=localStorage.getItem('com_org'); if(o) $('orgSel').value=o; }catch(e){}
+$('orgSel').onchange=()=>{ try{localStorage.setItem('com_org',$('orgSel').value);}catch(e){} };
+$('sideSel').addEventListener('change',()=>{ $('sideHint').hidden=$('sideSel').value!=='B'; });
 // 明るさが「暗いとき」と「最も明るいとき」の中間を超えたコマを、点灯したコマとする
 function detectSync(rs,vf,cf){
   const v=rs.map(r=>r.lum).filter(Number.isFinite).sort((a,b)=>a-b); if(!v.length) return null;
@@ -665,7 +702,7 @@ function syncText(){
 }
 function syncHead(){
   if(!sync) return [];
-  const r=sync.roi, L=[`# sync_roi_px,${r.x.toFixed(0)},${r.y.toFixed(0)},${r.w.toFixed(0)},${r.h.toFixed(0)}`,`# sync_threshold_lum,${sync.thr==null?'':sync.thr.toFixed(1)}`,`# sync_events,${sync.events.length}`];
+  const r=sync.roi, L=[`# sync_roi_px_topleft,${r.x.toFixed(0)},${r.y.toFixed(0)},${r.w.toFixed(0)},${r.h.toFixed(0)}`,`# sync_threshold_lum,${sync.thr==null?'':sync.thr.toFixed(1)}`,`# sync_events,${sync.events.length}`];
   if(sync.events[0]) L.push(`# sync_first_frame,${sync.events[0].k}`,`# sync_first_time_s,${sync.events[0].tr.toFixed(4)}`,`# sync_first_video_time_s,${sync.events[0].tv.toFixed(4)}`);
   sync.events.forEach((e,i)=>L.push(`# sync_on_${i+1},frame,${e.k},time_s,${e.tr.toFixed(4)},video_time_s,${e.tv.toFixed(4)}${e.atStart?',on_at_start':''}`));
   return L;
